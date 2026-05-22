@@ -1,0 +1,1901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VGTT | Visual Geometry Token Transmission</title>
+
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$'], ['\\(', '\\)']],
+            displayMath: [['$$', '$$'], ['\\[', '\\]']],
+            processEscapes: true
+        }
+    };
+
+    // --- Magnifying Glass Logic ---
+        document.addEventListener('DOMContentLoaded', () => {
+            const wrappers = document.querySelectorAll('.magnify-wrapper');
+
+            wrappers.forEach(wrapper => {
+                const img = wrapper.querySelector('.magnify-img');
+                const lens = wrapper.querySelector('.magnify-lens');
+                const zoomRatio = parseFloat(img.getAttribute('data-zoom')) || 2.5;
+
+                const setupLens = () => {
+                    lens.style.backgroundImage = `url('${img.src}')`;
+                };
+
+                if (img.complete) {
+                    setupLens();
+                } else {
+                    img.onload = setupLens;
+                }
+
+                wrapper.addEventListener('mousemove', (e) => {
+                    const rect = wrapper.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+
+                    const lensOffset = lens.offsetWidth / 2;
+                    lens.style.left = `${x - lensOffset}px`;
+                    lens.style.top = `${y - lensOffset}px`;
+
+                    const bgX = (x / rect.width) * 100;
+                    const bgY = (y / rect.height) * 100;
+
+                    lens.style.backgroundSize = `${rect.width * zoomRatio}px ${rect.height * zoomRatio}px`;
+                    lens.style.backgroundPosition = `${bgX}% ${bgY}%`;
+                });
+            });
+        });
+
+        // --- Audio Logic: Play Once & Reset ---
+    function toggleAudio() {
+        const container = document.querySelector('.audio-control');
+        const audio = document.getElementById('tldrAudio');
+
+        audio.loop = false;
+
+        if (audio.paused) {
+            audio.play().catch(e => console.error("Playback failed:", e));
+            container.classList.add('playing');
+            container.setAttribute('aria-label', 'Pause summary');
+        } else {
+            audio.pause();
+            container.classList.remove('playing');
+            container.setAttribute('aria-label', 'Listen to summary');
+        }
+
+        audio.onended = () => {
+            container.classList.remove('playing');
+
+            container.setAttribute('aria-label', 'Listen to summary');
+
+            audio.currentTime = 0;
+        };
+    }
+    </script>
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.7.2/css/all.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/jpswalsh/academicons@1.9.4/css/academicons.min.css">
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <script defer src="https://cdn.jsdelivr.net/npm/img-comparison-slider@8/dist/index.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/img-comparison-slider@8/dist/styles.css">
+
+    <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+
+    <style>
+        /* --- 1. Global Variables --- */
+        :root {
+            /* Brand Gradient: Blue -> Pink -> Blue flow */
+            --grad-brand: linear-gradient(90deg, #3494E6 0%, #EC6EAD 50%, #3494E6 100%);
+
+            /* Spacing units */
+            --space-xs: 10px;
+            --space-sm: 20px;
+            --space-md: 35px;
+
+            /* Colors */
+            --c-bg: #ffffff;
+            --c-text-main: #1a1a1a;
+            --c-text-muted: #666;
+            --c-border: #d1d1d1;
+            --c-accent: #3494E6;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+            color: var(--c-text-main);
+            background-color: var(--c-bg);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* --- 2. Background: Topological Grid (The "Scientific Canvas") --- */
+        .deformation-grid {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: -1;
+            background-color: #fff;
+            background-image:
+                linear-gradient(rgba(0,0,0,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,0,0,0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            transform: perspective(1000px) rotateX(2deg);
+            transform-origin: top center;
+        }
+
+        .ambient-noise {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            z-index: -1;
+            background: radial-gradient(circle at 50% 0%, rgba(52, 148, 230, 0.05), transparent 70%),
+                        radial-gradient(circle at 100% 100%, rgba(236, 110, 173, 0.05), transparent 60%);
+            pointer-events: none;
+        }
+
+        /* --- 2. Top Fade-out Background --- */
+        .hero-background {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 70%;
+            z-index: -1;
+            background-image: url('./images/bg.jpg');
+            background-size: cover;
+            background-position: center top;
+            background-repeat: no-repeat;
+            opacity: 0.5;
+            -webkit-mask-image: linear-gradient(to bottom, black 0%, transparent 90%);
+            mask-image: linear-gradient(to bottom, black 0%, transparent 90%);
+            pointer-events: none;
+        }
+
+        /* --- 3. Container --- */
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 50px 20px 50px 20px;
+        }
+
+        /* --- 4. Header Section --- */
+        .header {
+            text-align: center;
+            margin-bottom: var(--space-md);
+            padding-bottom: var(--space-sm);
+            border-bottom: 1px solid var(--c-border);
+        }
+
+        h1.title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            font-size: 2.5rem;
+            line-height: 1.2;
+            color: #000;
+            margin: 0 0 10px 0;
+            letter-spacing: -0.02em;
+        }
+
+        .title-line {
+            display: block;
+        }
+
+        .conference-name {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 1.55rem;
+            font-weight: 500;
+            margin-bottom: 10px;
+            background-image: var(--grad-brand);
+            background-size: 200% auto;
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            display: inline-block;
+        }
+
+        .authors {
+            font-size: 1.15rem;
+            margin-bottom: 5px;
+        }
+
+        .author-name {
+            display: inline-block;
+            margin: 0 10px;
+            text-decoration: none;
+            color: #222;
+            font-weight: 500;
+            position: relative;
+            cursor: pointer;
+            background-image: var(--grad-brand);
+            background-size: 200% auto;
+            -webkit-background-clip: text;
+            background-clip: text;
+            transition: all 0.5s ease;
+        }
+
+        .author-name:hover {
+            -webkit-text-fill-color: transparent;
+            background-position: right center;
+        }
+
+        .affiliations {
+            font-size: 1.0rem;
+            color: var(--c-text-muted);
+        }
+
+        .btn-row {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 13px;
+        }
+
+        .pill-btn {
+            background-image: var(--grad-brand);
+            background-size: 200% auto;
+            color: #fff;
+            padding: 6px 20px;
+            border-radius: 50px;
+            text-decoration: none;
+            font-weight: 600;
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 2px 10px rgba(52, 148, 230, 0.2);
+            transition: background-position 0.5s ease, box-shadow 0.3s ease;
+        }
+
+        .pill-btn:hover {
+            background-position: right center;
+            box-shadow: 0 5px 15px rgba(236, 110, 173, 0.3);
+        }
+
+        /* --- 5. TL;DR Module --- */
+        .tldr-box {
+            background: rgba(52, 148, 230, 0.03);
+            border: 1px solid rgba(52, 148, 230, 0.15);
+            border-radius: 8px;
+            padding: 25px;
+            margin-bottom: 40px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.02);
+        }
+
+        .tldr-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 15px;
+        }
+
+        .tldr-title-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .audio-control {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            color: #666;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .audio-control:hover {
+            border-color: #3494E6;
+            color: #3494E6;
+            background: rgba(52, 148, 230, 0.05);
+            transform: scale(1.05);
+        }
+
+        .audio-control.playing {
+            border-color: #3494E6;
+            background: #3494E6;
+            color: #fff;
+        }
+
+        .audio-control.playing #audioIcon {
+            display: none;
+        }
+
+        .audio-wave {
+            display: none;
+            align-items: center;
+            gap: 2px;
+            height: 12px;
+        }
+
+        .audio-control.playing .audio-wave {
+            display: flex;
+        }
+
+        .audio-wave span {
+            width: 2px;
+            background-color: #fff;
+            border-radius: 2px;
+            animation: quietWave 1s infinite ease-in-out;
+        }
+
+        .audio-wave span:nth-child(1) { height: 6px; animation-delay: 0.0s; }
+        .audio-wave span:nth-child(2) { height: 12px; animation-delay: 0.1s; }
+        .audio-wave span:nth-child(3) { height: 8px; animation-delay: 0.2s; }
+
+        @keyframes quietWave {
+            0%, 100% { transform: scaleY(0.5); }
+            50% { transform: scaleY(1); }
+        }
+
+        .tldr-icon {
+            color: var(--c-accent);
+            font-size: 1rem;
+        }
+
+        .tldr-label {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            color: var(--c-accent);
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .tldr-content {
+            font-size: 0.95rem;
+            color: #333;
+        }
+
+        .tldr-intro {
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+
+        .tldr-list {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 15px 0;
+        }
+
+        .tldr-list li {
+            margin-bottom: 10px;
+            padding-left: 18px;
+            position: relative;
+        }
+
+        .tldr-list li::before {
+            content: '•';
+            color: var(--c-accent);
+            position: absolute;
+            left: 0;
+            top: 0px;
+            font-weight: bold;
+            font-size: 1.1rem;
+            line-height: 1.5;
+        }
+
+        .tldr-item-title {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            color: #222;
+            margin-right: 4px;
+        }
+
+        .tldr-conclusion {
+            margin-top: 10px;
+            font-weight: 600;
+            color: #1a1a1a;
+            font-style: italic;
+            border-top: 1px dashed rgba(0,0,0,0.1);
+            padding-top: 10px;
+        }
+
+        /* --- 6. Content Flow --- */
+        .content-section { margin-bottom: 30px; }
+        .figure-content-section { margin-bottom: 15px; }
+        .content-figure-section { margin-bottom: 15px; }
+        .citation-section { margin-top: 40px; margin-bottom: 30px; }
+
+        .content-section ul, .figure-content-section ul, .content-figure-section ul { margin-bottom: 0; }
+        .content-section li, .figure-content-section li, .content-figure-section li { text-align: justify; }
+
+        h2 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: #000;
+            margin-top: 0;
+            margin-bottom: 20px;
+            letter-spacing: -0.01em;
+            position: relative;
+            display: inline-block;
+        }
+
+        h2::after {
+            content: '';
+            display: block;
+            width: 100%;
+            height: 2.2px;
+            background: linear-gradient(90deg, #3494E6 20%, #EC6EAD, transparent);
+            margin-top: 5px;
+            opacity: 0.5;
+        }
+
+        p {
+            margin-top: 0;
+            margin-bottom: 0;
+            text-align: justify;
+        }
+
+        .teaser-img {
+            width: 100%;
+            border-radius: 6px;
+            border: 1px solid rgba(0,0,0,0.05);
+            display: block;
+            margin-bottom: 12px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.05);
+        }
+
+        .caption {
+            font-size: 0.9rem;
+            color: var(--c-text-muted);
+            text-align: justify;
+            padding-bottom: 0;
+        }
+        .caption strong { color: #000; font-weight: 600; }
+
+        .math-block {
+            text-align: center;
+            margin: 0 0;
+            overflow-x: auto;
+            color: #111;
+        }
+
+        .method-heading {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            font-size: 1.25rem;
+            color: #222;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            position: relative;
+            padding-left: 20px;
+        }
+
+        .method-heading-1 {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 700;
+            font-size: 1.25rem;
+            color: #222;
+            margin-top: 0;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            position: relative;
+            padding-left: 20px;
+        }
+
+        .method-heading::before, .method-heading-1::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            width: 8px;
+            height: 8px;
+            background-color: #3494E6;
+            border-radius: 50%;
+        }
+
+        /* --- 7. Results Gallery --- */
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+
+        .result-cell {
+            background: #fafafa;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid rgba(0,0,0,0.05);
+            transition: transform 0.2s;
+        }
+
+        .result-cell img, .result-cell video { width: 100%; display: block; }
+
+        .label-overlay {
+            padding: 8px;
+            text-align: center;
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: #555;
+            border-top: 1px solid rgba(0,0,0,0.05);
+            background: #fff;
+        }
+
+        /* --- 8. BibTeX --- */
+        .bibtex-wrapper {
+            background: #f8f9fa;
+            border-radius: 6px;
+            padding: 20px;
+            border: 1px solid #e0e0e0;
+            position: relative;
+        }
+
+        .bibtex-code {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            color: #333;
+            white-space: pre-wrap;
+            margin: 0;
+        }
+
+        .copy-btn {
+            position: absolute;
+            top: 10px; right: 10px;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.75rem;
+            border: 1px solid #ccc;
+            background: #fff;
+            padding: 4px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .copy-btn:hover {
+            border-color: #333;
+            color: #000;
+        }
+
+        footer {
+            margin-top: 50px;
+            text-align: center;
+            font-size: 0.85rem;
+            color: #888;
+        }
+
+        @media (max-width: 600px) {
+            h1.title { font-size: 1.8rem; }
+            .results-grid { grid-template-columns: 1fr; }
+        }
+
+        /* --- Results Section Styling --- */
+        .results-intro {
+            margin-bottom: 20px;
+            text-align: justify;
+        }
+
+        .section-intro {
+            margin-top: 30px;
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .media-container {
+            background: #fff;
+            border: 1px solid rgba(0,0,0,0.08);
+            border-radius: 8px;
+            overflow: visible;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.03);
+            transition: box-shadow 0.3s ease;
+            position: relative;
+        }
+
+        .media-container:hover {
+            box-shadow: 0 10px 40px rgba(0,0,0,0.08);
+            z-index: 10;
+        }
+
+        .video-wrapper { margin-bottom: 0; }
+
+        .responsive-media {
+            width: 100%;
+            display: block;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+        }
+
+        .results-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+        }
+
+        .label-overlay {
+            padding: 12px;
+            text-align: center;
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: #444;
+            background: #fafafa;
+            border-top: 1px solid rgba(0,0,0,0.05);
+            border-bottom-left-radius: 8px;
+            border-bottom-right-radius: 8px;
+        }
+
+        /* --- Magnifying Glass --- */
+        .magnify-wrapper {
+            position: relative;
+            cursor: none;
+            overflow: visible;
+        }
+
+        .magnify-img {
+            width: 100%;
+            display: block;
+            pointer-events: none;
+            border-top-left-radius: 8px;
+            border-top-right-radius: 8px;
+        }
+
+        .magnify-lens {
+            position: absolute;
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            border: 4px solid rgba(255, 255, 255, 0.9);
+            box-shadow:
+                0 0 0 1px rgba(0,0,0,0.1),
+                0 10px 30px rgba(0,0,0,0.4),
+                inset 0 0 20px rgba(0,0,0,0.2);
+            background-repeat: no-repeat;
+            background-color: #fff;
+            opacity: 0;
+            transform: scale(0.5);
+            transition: opacity 0.2s, transform 0.2s;
+            pointer-events: none;
+            z-index: 100;
+        }
+
+        .magnify-wrapper:hover .magnify-lens {
+            opacity: 1;
+            transform: scale(1);
+        }
+
+        .zoom-hint {
+            position: absolute;
+            bottom: 15px;
+            right: 15px;
+            background: rgba(0,0,0,0.7);
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-family: 'Inter', sans-serif;
+            font-weight: 500;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            z-index: 5;
+        }
+
+        .magnify-wrapper:hover .zoom-hint {
+            opacity: 0;
+        }
+
+        /* --- 9. Bottom Fade-out Background --- */
+        .bottom-background {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            background-image: url('./images/bg-bottom.jpg');
+            background-size: cover;
+            background-position: center bottom;
+            background-repeat: no-repeat;
+            opacity: 0.5;
+            -webkit-mask-image: linear-gradient(to bottom, transparent 10%, black 100%);
+            mask-image: linear-gradient(to bottom, transparent 10%, black 100%);
+            pointer-events: none;
+        }
+
+        .gradient-link {
+            font-weight: 700;
+            text-decoration: none;
+            background-image: var(--grad-brand);
+            background-size: 200% auto;
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            color: #3494E6;
+            transition: background-position 0.5s ease;
+        }
+
+        .gradient-link:hover {
+            background-position: right center;
+        }
+
+        /* =========================================
+           Mobile & iOS Optimization
+           ========================================= */
+        html { -webkit-text-size-adjust: 100%; }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 30px 20px 80px 20px;
+                max-width: 100%;
+            }
+
+            p, li, .caption, .tldr-content {
+                text-align: left !important;
+                -webkit-hyphens: auto;
+                -ms-hyphens: auto;
+                hyphens: auto;
+                font-size: 1.05rem;
+                line-height: 1.65;
+                letter-spacing: -0.01em;
+                color: #222;
+            }
+
+            h1.title {
+                font-size: 1.9rem;
+                line-height: 1.3;
+                margin-bottom: 20px;
+            }
+
+            .title-line { display: inline; }
+
+            .conference-name {
+                font-size: 1rem;
+                white-space: normal;
+            }
+
+            .authors {
+                font-size: 1rem;
+                line-height: 1.8;
+                padding: 0 5px;
+            }
+
+            .btn-row {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+                margin-top: 30px;
+            }
+
+            .pill-btn {
+                font-size: 0.85rem;
+                padding: 12px 0;
+                justify-content: center;
+                width: auto;
+            }
+
+            .tldr-box {
+                padding: 20px;
+                margin-bottom: 30px;
+            }
+            .tldr-list li { padding-left: 15px; }
+
+            .results-grid {
+                grid-template-columns: 1fr;
+                gap: 30px;
+            }
+
+            .hero-background {
+                height: 420px;
+                opacity: 0.25;
+                background-position: top center;
+                background-size: cover;
+            }
+
+            .math-block {
+                max-width: 100%;
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
+                padding-bottom: 8px;
+                margin-left: -20px;
+                margin-right: -20px;
+                padding-left: 20px;
+                padding-right: 20px;
+                font-size: 0.95rem;
+            }
+
+            .magnify-lens, .zoom-hint { display: none !important; }
+            .magnify-img { pointer-events: auto; }
+        }
+
+        /* =========================================
+           VGTT New Components (Observation, Quant, Qual, Interp, GS)
+           All styles inherit NeHaD's palette and typography.
+           ========================================= */
+
+        /* --- Observation Grid --- */
+        .observation-section { margin-bottom: var(--space-md); }
+        .obs-controls-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+            margin-top: var(--space-sm);
+            padding: 14px 16px;
+            background: #ffffff;
+            border: 1px solid var(--c-border);
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.03);
+        }
+        .obs-field {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .obs-field label {
+            font-family: 'Inter', sans-serif;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--c-text-muted);
+        }
+        .obs-input {
+            padding: 5px 10px;
+            border: 1px solid var(--c-border);
+            border-radius: 6px;
+            background: #fafafa;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            color: #222;
+            cursor: pointer;
+            transition: border-color 0.2s ease;
+        }
+        .obs-input:focus { outline: none; border-color: var(--c-accent); }
+        .observation-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+            margin-top: 16px;
+            margin-bottom: 12px;
+        }
+        .obs-panel {
+            background: #ffffff;
+            border: 1px solid var(--c-border);
+            border-radius: 8px;
+            padding: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.03);
+            transition: box-shadow 0.3s ease;
+        }
+        .obs-panel:hover { box-shadow: 0 6px 20px rgba(52,148,230,0.08); }
+        .obs-img-stack {
+            position: relative;
+            border-radius: 4px;
+            overflow: hidden;
+            background: #fafafa;
+            line-height: 0;
+        }
+        .obs-image {
+            width: 100%;
+            display: block;
+        }
+        .obs-image-input {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+        .obs-img-stack:hover .obs-image-input { opacity: 1; }
+        .obs-layer-label {
+            margin-top: 8px;
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            font-size: 0.8rem;
+            color: var(--c-text-muted);
+            text-align: center;
+        }
+        @media (max-width: 900px) { .observation-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 600px) { .observation-grid { grid-template-columns: 1fr; } }
+
+        /* --- Quantitative Comparison Table --- */
+        .quant-wrapper {
+            overflow-x: auto;
+            margin: var(--space-sm) 0;
+            border-radius: 8px;
+            border: 1px solid var(--c-border);
+            background: #ffffff;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.03);
+        }
+        .quant-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: 'Inter', sans-serif;
+            font-size: 0.9rem;
+            background: #ffffff;
+        }
+        .quant-table thead tr {
+            background: linear-gradient(180deg, #f7f9fc 0%, #eef3f9 100%);
+        }
+        .quant-table th, .quant-table td {
+            padding: 10px 12px;
+            text-align: center;
+            border-bottom: 1px solid #ececec;
+        }
+        .quant-table th {
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            color: #222;
+        }
+        .quant-table td.method-col, .quant-table th.method-col {
+            text-align: left;
+            border-right: 2px solid var(--c-border);
+            font-weight: 500;
+        }
+        .quant-table tbody tr:nth-child(even) { background: #fafbfc; }
+        .quant-table tbody tr.highlight {
+            background: linear-gradient(90deg, rgba(52,148,230,0.10), rgba(236,110,173,0.07));
+            font-weight: 700;
+        }
+        .quant-table tbody tr.highlight td { color: #1a1a1a; }
+        .quant-table tbody tr:last-child td { border-bottom: none; }
+
+        .qual-task { margin-top: 12px; }
+        .subtask-head {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            font-size: 1.0rem;
+            color: #333;
+            margin: var(--space-sm) 0 4px 0;
+            padding-bottom: 6px;
+            border-bottom: 1px solid rgba(52,148,230,0.18);
+        }
+        .subtask-head i { color: var(--c-accent); font-size: 0.9rem; }
+        .gif-gallery {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .gif-cell {
+            border: 1px solid var(--c-border);
+            border-radius: 8px;
+            overflow: hidden;
+            background: #ffffff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+        }
+        .gif-cell img {
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            object-fit: cover;
+            display: block;
+            background: #f0f0f0;
+        }
+        @media (max-width: 700px) {
+            .gif-gallery { grid-template-columns: repeat(3, 1fr); }
+        }
+        .model-row {
+            display: flex;
+            gap: 16px;
+            flex-wrap: nowrap;
+            margin: 14px 0 0 0;
+        }
+        .model-cell {
+            position: relative;
+            flex: 1 1 0;
+            min-width: 0;
+            aspect-ratio: 1 / 1;
+            background: #fafafa;
+            border: 1px solid var(--c-border);
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.04);
+        }
+        .model-cell model-viewer { width: 100%; height: 100%; background: #ffffff; }
+        .model-cell-label {
+            position: absolute; top: 10px; left: 10px;
+            background: rgba(40,44,52,0.78);
+            color: #ffffff;
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            font-size: 0.8rem;
+            padding: 4px 12px;
+            border-radius: 999px;
+            z-index: 5;
+            letter-spacing: 0.02em;
+        }
+        .model-cell-label.is-right { left: auto; right: 10px; }
+        .scene-cards {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin-top: 14px;
+        }
+        .scene-card {
+            padding: 0;
+            border: 1px solid var(--c-border);
+            border-radius: 8px;
+            overflow: hidden;
+            background: #ffffff;
+            cursor: pointer;
+            font-family: 'Inter', sans-serif;
+            transition: box-shadow 0.25s ease, border-color 0.25s ease, transform 0.2s ease;
+        }
+        .scene-card img {
+            width: 100%;
+            aspect-ratio: 16 / 10;
+            object-fit: cover;
+            display: block;
+        }
+        .scene-card span {
+            display: block;
+            padding: 7px 8px;
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            font-size: 0.82rem;
+            color: var(--c-text-muted);
+            text-align: center;
+        }
+        .scene-card:hover {
+            border-color: var(--c-accent);
+            box-shadow: 0 6px 18px rgba(52,148,230,0.1);
+            transform: translateY(-2px);
+        }
+        .scene-card.is-active {
+            border-color: var(--c-accent);
+            box-shadow: 0 0 0 2px rgba(52,148,230,0.3), 0 6px 18px rgba(52,148,230,0.12);
+        }
+        .scene-card.is-active span { color: var(--c-accent); }
+
+        /* --- Interpolating States --- */
+        .interp-panel {
+            display: grid;
+            grid-template-columns: 1fr 2.2fr 1fr;
+            grid-template-rows: auto auto;
+            column-gap: 16px;
+            row-gap: 8px;
+            align-items: end;
+            background: #fafbfc;
+            border: 1px solid var(--c-border);
+            border-radius: 10px;
+            padding: 18px;
+            margin: var(--space-sm) 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.03);
+        }
+        .interp-frame-img {
+            grid-row: 1;
+            position: relative;
+            cursor: pointer;
+            border-radius: 6px;
+            overflow: hidden;
+            border: 1px solid var(--c-border);
+            line-height: 0;
+        }
+        .interp-frame-img[data-side="start"] { grid-column: 1; order: 1; }
+        .interp-frame-img[data-side="end"] { grid-column: 3; order: 4; }
+        .interp-frame-img img {
+            width: 100%;
+            display: block;
+        }
+        .interp-frame-img .frame-noise,
+        .interp-frame-img .frame-depth {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+        .interp-frame-img:hover .frame-noise { opacity: 1; }
+        .interp-frame-img.is-depth .frame-noise { opacity: 0; }
+        .interp-frame-img.is-depth .frame-depth { opacity: 1; }
+        .interp-label {
+            grid-row: 2;
+            grid-column: 1;
+            order: 2;
+            margin: 0;
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            font-size: 0.85rem;
+            color: var(--c-text-muted);
+            text-align: center;
+        }
+        .interp-label-end { grid-column: 3; order: 5; }
+        .interp-middle {
+            grid-column: 2;
+            grid-row: 1;
+            order: 3;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            padding-bottom: 2px;
+        }
+        #interp-image-wrapper {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 1064 / 788;
+            background: #ffffff;
+            border: 1px solid var(--c-border);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.85rem;
+            color: var(--c-text-muted);
+        }
+        #interp-image-wrapper .interp-current-frame {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        .interp-tag {
+            position: absolute;
+            top: 10px;
+            font-family: 'Space Grotesk', sans-serif;
+            font-weight: 600;
+            font-size: 0.75rem;
+            color: #ffffff;
+            padding: 3px 11px;
+            border-radius: 999px;
+            z-index: 4;
+            letter-spacing: 0.02em;
+            pointer-events: none;
+        }
+        .interp-tag-left { left: 10px; background: rgba(40,44,52,0.78); }
+        .interp-tag-right { right: 10px; background: rgba(40,44,52,0.78); }
+        input[type="range"].interp-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 7px;
+            background: linear-gradient(90deg, #3494E6 0%, #EC6EAD 100%);
+            border-radius: 999px;
+            outline: none;
+        }
+        input[type="range"].interp-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            background: #ffffff;
+            border: 2px solid var(--c-accent);
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.18);
+        }
+        input[type="range"].interp-slider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            background: #ffffff;
+            border: 2px solid var(--c-accent);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        @media (max-width: 700px) {
+            .interp-panel { grid-template-columns: 1fr; }
+            .interp-frame-img[data-side="start"],
+            .interp-frame-img[data-side="end"],
+            .interp-middle,
+            .interp-label,
+            .interp-label-end {
+                grid-column: 1;
+                grid-row: auto;
+            }
+        }
+
+        .nsr-task { margin-top: 12px; }
+        .nsr-viewer {
+            position: relative;
+            border: 1px solid var(--c-border);
+            border-radius: 8px;
+            overflow: hidden;
+            background: #ffffff;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.04);
+        }
+        .nsr-viewer img-comparison-slider {
+            display: block;
+            width: 100%;
+            outline: none;
+            --divider-color: #ffffff;
+            --divider-width: 2px;
+            --default-handle-color: #ffffff;
+            --default-handle-opacity: 0.9;
+        }
+        .nsr-viewer img-comparison-slider:focus,
+        .nsr-viewer img-comparison-slider:focus-visible { outline: none; }
+        .nsr-viewer img-comparison-slider img { width: 100%; display: block; }
+        .scene-cards-nsr { grid-template-columns: repeat(5, 1fr); }
+        @media (max-width: 700px) {
+            .scene-cards-nsr { grid-template-columns: repeat(3, 1fr); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="hero-background"></div>
+    <div class="ambient-noise"></div>
+
+    <div class="container">
+
+        <header class="header">
+            <h1 class="title">
+                <span class="title-line">VGTT: Feed-Forward Visual Geometry Token</span>
+                <span class="title-line">Transmission for 6G Immersive Communication</span>
+            </h1>
+
+            <div class="conference-name">
+                <a href="https://www.comsoc.org/publications/journals/ieee-jsac" class="author-name">IEEE JSAC 2026, Under Review</a>
+            </div>
+
+            <div class="authors">
+                <a href="https://scholar.google.com/citations?user=N33wbdEAAAAJ" class="author-name">Hai-Long Qin<sup>1</sup></a>
+                <a href="https://scholar.google.com/citations?user=0I_YtFsAAAAJ" class="author-name">Jincheng Dai<sup>1</sup></a>
+                <a href="https://scholar.google.com/citations?user=f9s8H6UAAAAJ" class="author-name">Sixian Wang<sup>2</sup></a>
+                <a href="https://scholar.google.com/citations?user=R9iwlJcAAAAJ" class="author-name">Guo Lu<sup>2</sup></a>
+                <a href="https://scholar.google.com/citations?user=jvrxePoAAAAJ" class="author-name">Lei Luo<sup>3</sup></a><br>
+                <a href="https://scholar.google.com/citations?user=C7iZbYMAAAAJ" class="author-name">Ce Zhu<sup>4</sup></a>
+                <a href="https://ieeexplore.ieee.org/author/37278428800" class="author-name">Wenjun Zhang<sup>2</sup></a>
+                <a href="https://ieeexplore.ieee.org/author/37274503400" class="author-name">Ping Zhang<sup>1</sup></a>
+            </div>
+
+            <div class="affiliations">
+                <sup>1</sup>Beijing University of Posts and Telecommunications (BUPT)<br>
+                <sup>2</sup>Shanghai Jiao Tong University (SJTU)<br>
+                <sup>3</sup>Chongqing University of Posts and Telecommunications (CQUPT)<br>
+                <sup>4</sup>University of Electronic Science and Technology of China (UESTC)<br>
+            </div>
+
+            <div class="btn-row">
+                <a href="#" class="pill-btn"><i class="fa-regular fa-file-pdf"></i> Paper</a>
+                <a href="#" class="pill-btn"><i class="ai ai-arxiv"></i> arXiv</a>
+                <a href="https://github.com/qin-jingyun/VGTT" class="pill-btn"><i class="fa-brands fa-github"></i> GitHub Repository</a>
+            </div>
+        </header>
+
+        <div class="tldr-box">
+            <div class="tldr-header">
+                <div class="tldr-title-group">
+                    <i class="fa-solid fa-bolt tldr-icon"></i>
+                    <span class="tldr-label">TL;DR</span>
+                </div>
+
+                <div class="audio-control" onclick="toggleAudio()" aria-label="Listen to summary" role="button" tabindex="0">
+                    <i class="fa-solid fa-volume-high" id="audioIcon"></i>
+                    <div class="audio-wave" id="audioWave">
+                        <span></span><span></span><span></span>
+                    </div>
+                    <audio id="tldrAudio" src="./assets/intro.wav"></audio>
+                </div>
+            </div>
+            <div class="tldr-content">
+                <p class="tldr-intro">
+                    We propose <strong>VGTT</strong>, a wireless 3D delivery paradigm for 6G immersive communication. Instead of sending raw 3D primitives or compressed 2D views, VGTT transmits geometry-aware semantic tokens distilled by cross-view spatial reasoning.
+                </p>
+                <ul class="tldr-list">
+                    <li>
+                        <span class="tldr-item-title">Unified Token Representation</span>
+                        Tokens distilled at the transmitter serve multiple 3D attributes, so the receiver predicts depth maps, point clouds, and camera poses in a single feed-forward pass.
+                    </li>
+                    <li>
+                        <span class="tldr-item-title">Channel-Aware JSCC Design</span>
+                        Three components, LARA, DLCM, and CLIS, built on a neural joint source-channel codec, handle bandwidth allocation, channel protection, and feature recovery end to end.
+                    </li>
+                    <li>
+                        <span class="tldr-item-title">Dual-Level Transmission</span>
+                        Geometric semantics and spatial detail are sent as two complementary levels, carried by a deep token anchor and a shallow token anchor.
+                    </li>
+                </ul>
+                <p class="tldr-conclusion">
+                    In short, VGTT trades off bandwidth, latency, and fidelity while keeping channel robustness and task versatility, as a foundation for closed-loop digital twin networks.
+                </p>
+            </div>
+        </div>
+
+        <section class="content-figure-section">
+            <h2>Abstract</h2>
+            <p>
+                Synchronizing the 3D physical world with its digital counterpart is a core real-to-sim task of digital twin networks (DTNs) for 6G immersive communication. To build such a twin, the receiver needs several geometric attributes that downstream 3D tasks use together. Existing methods separate the representation and the transmission of these attributes: the occupancy-unit paradigm sends raw 3D primitives in one fixed format such as point clouds, while the pixel-feature paradigm sends compressed 2D views without conveying geometry and leaves the receiver to recover it. <strong>We propose Visual Geometry Token Transmission (VGTT), a paradigm that transmits geometry-aware semantic tokens as a unified representation</strong>, distilled through cross-view spatial reasoning at the transmitter, and predicts multiple 3D attributes from these tokens at the receiver in a single feed-forward pass. Under bandwidth and channel constraints, VGTT treats geometric semantics and spatial detail as two complementary levels and integrates three channel-aware components, LARA, DLCM, and CLIS, built on neural joint source-channel coding, to handle bandwidth allocation, channel protection, and feature recovery end to end. Experiments show that VGTT holds a bandwidth, latency, and fidelity trade-off while keeping channel robustness and task versatility, <strong>offering a scalable foundation for closed-loop DTNs in 6G immersive communication.</strong>
+            </p>
+        </section>
+
+        <section class="content-section">
+            <img src="./images/pipeline.png" class="teaser-img">
+            <div class="caption">
+                <strong>Figure 1.</strong> Overview of VGTT. The transmitter distills geometry-aware semantic tokens from unposed multi-view images using a DINOv2 tokenizer and an Alternating-Attention backbone. Two anchors, a deep token layer and a shallow token layer, pass through LARA, the joint source-channel coding (JSCC) encoders, and DLCM before entering the wireless channel. The receiver mirrors these stages with DLCD, the JSCC decoder, and CLIS, and the VGGT heads then predict depth, point maps, and camera poses in one feed-forward pass.
+            </div>
+        </section>
+
+        <!-- Observation -->
+        <section class="content-figure-section observation-section">
+            <h2>Observation</h2>
+            <p>
+                The geometry heads of VGGT read several layers of the Alternating-Attention backbone, but a wireless link cannot carry every layer in full. To see what each layer holds, we visualize the backbone token features layer by layer; the four panels below show the four layers that the DPT head reads. The features shift from texture-level patterns in the shallow layers to geometry-level structure in the deep layers, so the deepest layer alone is not enough: it keeps geometry but loses texture, and transmitting it by itself leaves the recovered geometry smoothed and object boundaries blurred. The four layers form two groups, a shallow group that carries spatial detail and a deep group that carries geometric semantics; layers correlate within a group and stay complementary across groups. This observation is the reason for the three modules of VGTT. Because the groups are not interchangeable, VGTT sends one anchor from each group and lets LARA split the channel budget between them as the channel varies. Because the two anchors differ in statistics and the deep anchor's camera token has no spatial redundancy, DLCM protects each anchor on its own path. Because each group is internally correlated, CLIS infers the non-transmitted layer from its same-group anchor at the receiver. Pick an input mode, a scene, and a frame; hover any panel to cross-fade it to the clean input.
+            </p>
+            <div class="obs-controls-bar">
+                <div class="obs-field">
+                    <label>input</label>
+                    <select class="obs-input" id="obs-input">
+                        <option value="single_view">single view</option>
+                        <option value="multiple_views">multiple views</option>
+                    </select>
+                </div>
+                <div class="obs-field">
+                    <label>scene</label>
+                    <select class="obs-input" id="obs-token"></select>
+                </div>
+                <div class="obs-field">
+                    <label>frame</label>
+                    <select class="obs-input" id="obs-frame"></select>
+                </div>
+            </div>
+            <div class="observation-grid">
+                <div class="obs-panel" data-layer="4">
+                    <div class="obs-img-stack">
+                        <img class="obs-image" alt="Layer 4 activation"/>
+                        <img class="obs-image-input" alt="" aria-hidden="true"/>
+                    </div>
+                    <div class="obs-layer-label">Layer 4</div>
+                </div>
+                <div class="obs-panel" data-layer="11">
+                    <div class="obs-img-stack">
+                        <img class="obs-image" alt="Layer 11 activation"/>
+                        <img class="obs-image-input" alt="" aria-hidden="true"/>
+                    </div>
+                    <div class="obs-layer-label">Layer 11</div>
+                </div>
+                <div class="obs-panel" data-layer="17">
+                    <div class="obs-img-stack">
+                        <img class="obs-image" alt="Layer 17 activation"/>
+                        <img class="obs-image-input" alt="" aria-hidden="true"/>
+                    </div>
+                    <div class="obs-layer-label">Layer 17</div>
+                </div>
+                <div class="obs-panel" data-layer="23">
+                    <div class="obs-img-stack">
+                        <img class="obs-image" alt="Layer 23 activation"/>
+                        <img class="obs-image-input" alt="" aria-hidden="true"/>
+                    </div>
+                    <div class="obs-layer-label">Layer 23</div>
+                </div>
+            </div>
+            <div class="caption">
+                <strong>Figure 2.</strong> Token feature maps across the four-depth layers of the Alternating-Attention backbone. The four panels share one selection of input mode, scene, and frame. The features evolve from texture-level detail in the shallow layers to geometry-level structure in the deep layers. Hover a panel to reveal the clean input image.
+            </div>
+        </section>
+
+        <section id="Method" class="content-figure-section">
+            <h2>Method</h2>
+
+            <p>
+                VGTT inherits the front end of VGGT: a DINOv2 tokenizer and an Alternating-Attention backbone turn unposed multi-view images into intermediate token features at every backbone layer. The geometry heads of VGGT impose two constraints on any transmission scheme. The DPT head reads a fixed set of four backbone layers, $\{\mathbf{z}_4, \mathbf{z}_{11}, \mathbf{z}_{17}, \mathbf{z}_{23}\}$, which sets an effectiveness constraint, since the receiver must deliver features at all four depths. The camera head reads a single camera token at the deepest layer, which sets a reliability constraint, since that token has no spatial redundancy. Guided by these constraints, VGTT places only a deep anchor $\mathbf{z}_{23}$ and a shallow anchor $\mathbf{z}_{11}$ on the wireless channel. The two anchors pass through LARA, an asymmetric pair of JSCC encoders, and DLCM before the channel; the receiver mirrors these stages with DLCD and a shared JSCC decoder, and CLIS restores the two non-transmitted layers so that the VGGT heads receive all four. The pipeline is trained over wireless channels in two stages, a channel-aware self-distillation stage followed by an end-to-end geometry-forcing stage, so that bandwidth allocation, channel protection, and feature recovery co-adapt across channel conditions.
+            </p>
+
+            <h3 class="method-heading">Layer-Adaptive Rate Allocator (LARA)</h3>
+            <p>
+                LARA resolves the tension between the four-layer effectiveness constraint and the limited bandwidth of a wireless link. Transmitting only the deepest layer leaves the recovered geometry smoothed, because that layer carries geometric semantics but little texture. The four layers instead split into a shallow group rich in texture and a deep group rich in geometry, so VGTT sends one anchor from each group. The two anchors also differ in compressibility and in noise tolerance, and both depend on the channel state, so the split between them cannot be fixed in advance. Given the signal-to-noise ratio $\gamma$ and the target channel bandwidth ratio $\rho$, LARA forms an input $\mathbf{u}$ and predicts a split $\alpha$ that maps to the per-anchor dimensions:
+            </p>
+            <div class="math-block">
+                $$
+                \mathbf{u} = [\gamma/20,\ \rho]^{\top}, \quad
+                \alpha = \alpha_{\min} + (\alpha_{\max} - \alpha_{\min})\,\sigma\!\left(f_{\boldsymbol{\theta}}(\mathbf{u})\right), \quad
+                d_{23} = \lfloor \alpha D \rceil, \quad d_{11} = D - d_{23}.
+                $$
+            </div>
+            <p>
+                Here $f_{\boldsymbol{\theta}}$ is a lightweight MLP and $D$ is the bottleneck width. The clamped range keeps either anchor from being starved, and the integers $d_{23}$ and $d_{11}$ drive a binary rate mask on the transmitted symbols. LARA learns the channel-conditioned allocation from the geometry losses, without direct supervision on $\alpha$.
+            </p>
+
+            <h3 class="method-heading">Dual-Level Channel Modulator (DLCM)</h3>
+            <p>
+                Once LARA fixes the per-anchor rate, the JSCC encoders compress the two anchors and DLCM protects them before they enter the channel. A single shared modulator is not adequate: the two anchors carry information with different statistical character, and the deep anchor additionally inherits a structural vulnerability, since its camera token has no spatial redundancy and noise on it cascades into the pose and then into the depth and point maps. DLCM therefore uses two structurally identical but parameter-independent paths, one per anchor, each a Channel-ModNet cascade conditioned on the SNR $\gamma$ and ending in a sigmoid gate $\mathbf{g}(\gamma)$ applied to the compressed anchor $\mathbf{y}$:
+            </p>
+            <div class="math-block">
+                $$ \mathbf{s} = \mathbf{y} \odot \mathbf{g}(\gamma). $$
+            </div>
+            <p>
+                A structurally symmetric demodulator, DLCD, mirrors DLCM at the receiver. The two ends share the SNR but not the weights, so DLCM and DLCD learn to communicate through an SNR-indexed family of coding policies.
+            </p>
+
+            <h3 class="method-heading">Cross-Layer Inverse Solver (CLIS)</h3>
+            <p>
+                The DPT head needs four layers, but only the two anchors traverse the channel, so the receiver reconstructs the two non-transmitted layers locally, without any further channel use. Because each group is internally correlated, an auxiliary layer can be inferred from its same-group anchor, and the inference runs in a uniform deep-to-shallow direction. CLIS instantiates this with two parallel solvers, one per group:
+            </p>
+            <div class="math-block">
+                $$ \hat{\mathbf{z}}_{17} = g_{\boldsymbol{\phi}_{17}}\bigl(\hat{\mathbf{z}}_{23}\bigr), \qquad \hat{\mathbf{z}}_{4} = g_{\boldsymbol{\phi}_{4}}\bigl(\hat{\mathbf{z}}_{11}\bigr). $$
+            </div>
+            <p>
+                Each solver $g_{\boldsymbol{\phi}}$ is a small MLP, applied per token and per frame. The mapping is intentionally non-residual: the deep anchor and the shallow auxiliary differ in feature norm, and a residual path would let the larger-norm anchor mask the smaller-norm shallow signal that the DPT head relies on.
+            </p>
+        </section>
+
+        <!-- Results -->
+        <section class="content-section">
+            <h2>Results</h2>
+            <p class="results-intro">
+                From the tokens recovered at the receiver, VGTT predicts several 3D attributes in a single feed-forward pass, and these predictions also support downstream rendering. The panels below show qualitative comparisons against baselines under wireless channels. Drag to rotate, hover to inspect, and switch scenes with the cards.
+            </p>
+
+<!--
+            <h3 class="method-heading">Quantitative Comparison</h3>
+            <p class="section-intro">
+                Quantitative comparison against representative baselines. Reusable table template &mdash; fill in the metric values.
+            </p>
+            <div class="quant-wrapper">
+                <table class="quant-table">
+                    <thead>
+                        <tr>
+                            <th rowspan="2" class="method-col">Method</th>
+                            <th colspan="2">1000 tokens</th>
+                            <th colspan="2">500 tokens</th>
+                            <th colspan="2">300 tokens</th>
+                            <th colspan="2">100 tokens</th>
+                        </tr>
+                        <tr>
+                            <th>PSNR &uarr;</th><th>Time &darr;</th>
+                            <th>PSNR &uarr;</th><th>Time &darr;</th>
+                            <th>PSNR &uarr;</th><th>Time &darr;</th>
+                            <th>PSNR &uarr;</th><th>Time &darr;</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="method-col">Baseline-A</td>
+                            <td></td><td></td>
+                            <td></td><td></td>
+                            <td></td><td></td>
+                            <td></td><td></td>
+                        </tr>
+                        <tr>
+                            <td class="method-col">Baseline-B</td>
+                            <td></td><td></td>
+                            <td></td><td></td>
+                            <td></td><td></td>
+                            <td></td><td></td>
+                        </tr>
+                        <tr>
+                            <td class="method-col">Baseline-C</td>
+                            <td></td><td></td>
+                            <td></td><td></td>
+                            <td></td><td></td>
+                            <td></td><td></td>
+                        </tr>
+                        <tr class="highlight">
+                            <td class="method-col">VGTT (Ours)</td>
+                            <td></td><td></td>
+                            <td></td><td></td>
+                            <td></td><td></td>
+                            <td></td><td></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+-->
+
+            <h3 class="method-heading">Point Cloud Reconstruction</h3>
+            <p class="section-intro">
+                VGTT decodes dense point maps from the tokens recovered at the receiver. Each viewer pair places VGTT against the baseline. Drag to rotate, scroll to zoom, and switch scenes with the cards below.
+            </p>
+            <div class="qual-task" data-task="point">
+                <div class="model-row">
+                    <div class="model-cell">
+                        <div class="model-cell-label">Ours</div>
+                        <model-viewer class="qual-viewer-ours"
+                            src="./assets/glb/point/facade/vgtt.glb"
+                            loading="eager"
+                            camera-controls
+                            interaction-prompt="none"
+                            shadow-intensity="0"
+                            environment-image="legacy"
+                            touch-action="pan-y">
+                        </model-viewer>
+                    </div>
+                    <div class="model-cell">
+                        <div class="model-cell-label is-right">Baseline</div>
+                        <model-viewer class="qual-viewer-base"
+                            src="./assets/glb/point/facade/baseline.glb"
+                            loading="eager"
+                            camera-controls
+                            interaction-prompt="none"
+                            shadow-intensity="0"
+                            environment-image="legacy"
+                            touch-action="pan-y">
+                        </model-viewer>
+                    </div>
+                </div>
+                <div class="scene-cards">
+                    <button type="button" class="scene-card is-active" data-scene="facade">
+                        <img src="./assets/glb/scene/facade.png" alt="Facade"/>
+                        <span>Facade</span>
+                    </button>
+                    <button type="button" class="scene-card" data-scene="kitchen">
+                        <img src="./assets/glb/scene/kitchen.png" alt="Kitchen"/>
+                        <span>Kitchen</span>
+                    </button>
+                    <button type="button" class="scene-card" data-scene="living_room">
+                        <img src="./assets/glb/scene/living_room.png" alt="Living Room"/>
+                        <span>Living Room</span>
+                    </button>
+                </div>
+            </div>
+
+            <h3 class="method-heading">Camera Pose Estimation</h3>
+            <p class="section-intro">
+                VGTT predicts a per-view camera pose from the tokens recovered at the receiver. The viewers show the estimated camera frusta for VGTT and the baseline; switch scenes with the cards below.
+            </p>
+            <div class="qual-task" data-task="camera">
+                <div class="model-row">
+                    <div class="model-cell">
+                        <div class="model-cell-label">Ours</div>
+                        <model-viewer class="qual-viewer-ours"
+                            src="./assets/glb/camera/bicycle/vgtt.glb"
+                            loading="eager"
+                            camera-controls
+                            interaction-prompt="none"
+                            shadow-intensity="0"
+                            environment-image="legacy"
+                            touch-action="pan-y">
+                        </model-viewer>
+                    </div>
+                    <div class="model-cell">
+                        <div class="model-cell-label is-right">Baseline</div>
+                        <model-viewer class="qual-viewer-base"
+                            src="./assets/glb/camera/bicycle/baseline.glb"
+                            loading="eager"
+                            camera-controls
+                            interaction-prompt="none"
+                            shadow-intensity="0"
+                            environment-image="legacy"
+                            touch-action="pan-y">
+                        </model-viewer>
+                    </div>
+                </div>
+                <div class="scene-cards">
+                    <button type="button" class="scene-card is-active" data-scene="bicycle">
+                        <img src="./assets/glb/scene/bicycle.png" alt="Bicycle"/>
+                        <span>Bicycle</span>
+                    </button>
+                    <button type="button" class="scene-card" data-scene="kitchen">
+                        <img src="./assets/glb/scene/kitchen.png" alt="Kitchen"/>
+                        <span>Kitchen</span>
+                    </button>
+                    <button type="button" class="scene-card" data-scene="train">
+                        <img src="./assets/glb/scene/train.png" alt="Train"/>
+                        <span>Train</span>
+                    </button>
+                </div>
+            </div>
+
+            <h3 class="method-heading">Monocular Depth Estimation</h3>
+            <p class="section-intro">
+                VGTT predicts monocular depth from the tokens recovered at the receiver. Drag the slider to scrub through the sequence; the stitched view places the VGTT depth on the left and the baseline depth on the right. Hover a side frame to preview its noisy channel input, or click it to toggle the predicted depth.
+            </p>
+            <div class="interp-panel">
+                <div class="interp-frame-img" data-side="start">
+                    <img class="frame-clean" src="./assets/depth/start.png" alt="Start frame"/>
+                    <img class="frame-noise" src="./assets/depth/start_noise.png" alt=""/>
+                    <img class="frame-depth" src="./assets/depth/start_depth.png" alt=""/>
+                </div>
+                <div class="interp-middle">
+                    <div id="interp-image-wrapper">
+                        <span class="interp-tag interp-tag-left">Ours</span>
+                        <span class="interp-tag interp-tag-right">Baseline</span>
+                        <span class="interp-loading">Loading&hellip;</span>
+                    </div>
+                    <input class="interp-slider" id="interp-slider"
+                           type="range" min="0" max="119" step="1" value="0"
+                           aria-label="Interpolation frame slider"/>
+                </div>
+                <div class="interp-frame-img" data-side="end">
+                    <img class="frame-clean" src="./assets/depth/end.png" alt="End frame"/>
+                    <img class="frame-noise" src="./assets/depth/end_noise.png" alt=""/>
+                    <img class="frame-depth" src="./assets/depth/end_depth.png" alt=""/>
+                </div>
+                <p class="interp-label">Start Frame</p>
+                <p class="interp-label interp-label-end">End Frame</p>
+            </div>
+            <!-- <div class="caption">
+                <strong>Figure 3.</strong> Monocular depth predicted by VGTT, shown as stitched comparisons with the VGTT depth on the left half and the baseline depth on the right half.
+            </div> -->
+
+            <h3 class="method-heading">Neural Scene Rendering</h3>
+            <p class="section-intro">
+                The camera poses and point maps predicted by VGTT initialize 3D Gaussian Splatting for novel-view rendering. Drag the divider to compare VGTT against the baseline, and switch scenes with the cards below.
+            </p>
+            <div class="nsr-task">
+                <div class="nsr-viewer">
+                    <img-comparison-slider>
+                        <img slot="first"  src="./assets/3dgs/bicycle/ours.png" alt="VGTT">
+                        <img slot="second" src="./assets/3dgs/bicycle/baseline.png" alt="Baseline">
+                    </img-comparison-slider>
+                    <span class="interp-tag interp-tag-left">Ours</span>
+                    <span class="interp-tag interp-tag-right">Baseline</span>
+                </div>
+                <div class="scene-cards scene-cards-nsr">
+                    <button type="button" class="scene-card is-active" data-scene="bicycle">
+                        <img src="./assets/3dgs/bicycle/input.png" alt="Bicycle"/>
+                        <span>Bicycle</span>
+                    </button>
+                    <button type="button" class="scene-card" data-scene="bonsai">
+                        <img src="./assets/3dgs/bonsai/input.png" alt="Bonsai"/>
+                        <span>Bonsai</span>
+                    </button>
+                    <button type="button" class="scene-card" data-scene="garden">
+                        <img src="./assets/3dgs/garden/input.png" alt="Garden"/>
+                        <span>Garden</span>
+                    </button>
+                    <button type="button" class="scene-card" data-scene="playroom">
+                        <img src="./assets/3dgs/playroom/input.png" alt="Playroom"/>
+                        <span>Playroom</span>
+                    </button>
+                    <button type="button" class="scene-card" data-scene="train">
+                        <img src="./assets/3dgs/train/input.png" alt="Train"/>
+                        <span>Train</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="subtask-head"><i class="fa-solid fa-photo-film"></i> Assets Gallery</div>
+            <p class="section-intro">
+                Additional VGTT renderings with 3D Gaussian Splatting across a range of synthetic and real-world scenes.
+            </p>
+            <div class="gif-gallery">
+                <div class="gif-cell"><img src="./assets/gallery/1-chair.gif" alt="" loading="lazy" decoding="async"></div>
+                <div class="gif-cell"><img src="./assets/gallery/1-drums.gif" alt="" loading="lazy" decoding="async"></div>
+                <div class="gif-cell"><img src="./assets/gallery/1-ficus.gif" alt="" loading="lazy" decoding="async"></div>
+                <div class="gif-cell"><img src="./assets/gallery/1-hotdog.gif" alt="" loading="lazy" decoding="async"></div>
+                <div class="gif-cell"><img src="./assets/gallery/1-lego.gif" alt="" loading="lazy" decoding="async"></div>
+                <div class="gif-cell"><img src="./assets/gallery/2-dtu_scan106.gif" alt="" loading="lazy" decoding="async"></div>
+                <div class="gif-cell"><img src="./assets/gallery/2-dtu_scan114.gif" alt="" loading="lazy" decoding="async"></div>
+                <div class="gif-cell"><img src="./assets/gallery/2-dtu_scan55.gif" alt="" loading="lazy" decoding="async"></div>
+                <div class="gif-cell"><img src="./assets/gallery/2-dtu_scan65.gif" alt="" loading="lazy" decoding="async"></div>
+                <div class="gif-cell"><img src="./assets/gallery/2-dtu_scan69.gif" alt="" loading="lazy" decoding="async"></div>
+                <div class="gif-cell"><img src="./assets/gallery/3-llff_fern.gif" alt="" loading="lazy" decoding="async"></div>
+                <div class="gif-cell"><img src="./assets/gallery/3-llff_flower.gif" alt="" loading="lazy" decoding="async"></div>
+                <div class="gif-cell"><img src="./assets/gallery/3-llff_orchids.gif" alt="" loading="lazy" decoding="async"></div>
+                <div class="gif-cell"><img src="./assets/gallery/3-llff_room.gif" alt="" loading="lazy" decoding="async"></div>
+                <div class="gif-cell"><img src="./assets/gallery/3-llff_trex.gif" alt="" loading="lazy" decoding="async"></div>
+            </div>
+
+            <p class="section-intro">
+                Qualitative rendering comparisons on synthetic and real-world scenes. Hover over an image to inspect fine details.
+            </p>
+            <div class="results-stack">
+                <div class="media-container result-cell">
+                    <div class="magnify-wrapper">
+                        <img src="./assets/mvs/synthetic.png" alt="Synthetic Scenes Comparison" class="magnify-img" data-zoom="3">
+                        <div class="magnify-lens"></div>
+                        <div class="zoom-hint"><i class="fa-solid fa-magnifying-glass"></i> Hover to Zoom</div>
+                    </div>
+                    <div class="label-overlay">Comparison on Synthetic Scenes</div>
+                </div>
+
+                <div class="media-container result-cell">
+                    <div class="magnify-wrapper">
+                        <img src="./assets/mvs/real.png" alt="Real-World Scenes Comparison" class="magnify-img" data-zoom="3">
+                        <div class="magnify-lens"></div>
+                        <div class="zoom-hint"><i class="fa-solid fa-magnifying-glass"></i> Hover to Zoom</div>
+                    </div>
+                    <div class="label-overlay">Comparison on Real-World Scenes</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="citation-section">
+            <h2>Citation</h2>
+            <div class="bibtex-wrapper">
+                <button class="copy-btn" onclick="copyBibtex()">Copy</button>
+<pre class="bibtex-code" id="bibtex-text">
+@article{qin-vgtt,
+    title   = {VGTT: Feed-Forward Visual Geometry Token Transmission for 6G Immersive Communication},
+    author  = {Qin, Hai-Long and Dai, Jincheng and Wang, Sixian and Lu, Guo and Luo, Lei and Zhu, Ce and Zhang, Wenjun and Zhang, Ping},
+    journal = {arXiv preprint arXiv:2605.xxxxx},
+    year    = {2026}
+}
+</pre>
+            </div>
+        </section>
+
+        <footer>
+            Copyright &copy; 2026 Hai-Long Qin. All Rights Reserved.
+        </footer>
+
+    </div>
+
+    <script>
+        // --- BibTeX copy ---
+        function copyBibtex() {
+            const text = document.getElementById('bibtex-text').textContent;
+            navigator.clipboard.writeText(text.trim()).then(() => {
+                const btn = document.querySelector('.copy-btn');
+                btn.textContent = 'Copied!';
+                btn.style.borderColor = '#10b981';
+                btn.style.color = '#10b981';
+                btn.blur();
+                setTimeout(() => {
+                    btn.textContent = 'Copy';
+                    btn.style.borderColor = '';
+                    btn.style.color = '';
+                }, 2000);
+            });
+        }
+
+        (function initObservation() {
+            const BASE = './assets/observation';
+            const DATA = {
+                single_view: {
+                    tokens: ['sailing', 'flamingo', 'statue', 'house', 'cartoon'],
+                    frames: [0]
+                },
+                multiple_views: {
+                    tokens: ['flower', 'truck', 'temple'],
+                    frames: [0, 1, 2]
+                }
+            };
+
+            document.addEventListener('DOMContentLoaded', () => {
+                const inputSel = document.getElementById('obs-input');
+                const tokenSel = document.getElementById('obs-token');
+                const frameSel = document.getElementById('obs-frame');
+                const panels   = document.querySelectorAll('.obs-panel');
+                if (!inputSel || !tokenSel || !frameSel) return;
+
+                function fillSelect(sel, values) {
+                    sel.innerHTML = values.map(v => `<option value="${v}">${v}</option>`).join('');
+                }
+                function render() {
+                    const mode  = inputSel.value;
+                    const token = tokenSel.value;
+                    const frame = frameSel.value;
+                    panels.forEach(panel => {
+                        const dir   = `${BASE}/${mode}/${token}`;
+                        const layer = panel.dataset.layer;
+                        panel.querySelector('.obs-image').src = `${dir}/view${frame}_layer${layer}.png`;
+                        panel.querySelector('.obs-image-input').src = `${dir}/view${frame}_input.png`;
+                    });
+                }
+                function onModeChange() {
+                    const cfg = DATA[inputSel.value];
+                    fillSelect(tokenSel, cfg.tokens);
+                    fillSelect(frameSel, cfg.frames);
+                    render();
+                }
+                inputSel.addEventListener('change', onModeChange);
+                tokenSel.addEventListener('change', render);
+                frameSel.addEventListener('change', render);
+                onModeChange();
+            });
+        })();
+
+        (function initInterpolation() {
+            const NUM = 120;
+            const BASE = './assets/depth/combined';
+            const cache = [];
+            for (let i = 0; i < NUM; i++) {
+                const im = new Image();
+                im.src = `${BASE}/${String(i).padStart(3, '0')}.png`;
+                im.className = 'interp-current-frame';
+                im.ondragstart = () => false;
+                im.oncontextmenu = () => false;
+                cache[i] = im;
+            }
+            function setFrame(i) {
+                const wrap = document.getElementById('interp-image-wrapper');
+                if (!wrap) return;
+                const im = cache[i];
+                if (!im) return;
+                const loading = wrap.querySelector('.interp-loading');
+                if (loading) loading.remove();
+                const prev = wrap.querySelector('.interp-current-frame');
+                if (prev && prev !== im) prev.remove();
+                if (im.parentNode !== wrap) wrap.appendChild(im);
+            }
+            document.addEventListener('DOMContentLoaded', () => {
+                const slider = document.getElementById('interp-slider');
+                if (!slider) return;
+                slider.addEventListener('input', e => setFrame(parseInt(e.target.value, 10)));
+                setFrame(0);
+            });
+        })();
+
+        (function initInterpFrames() {
+            document.addEventListener('DOMContentLoaded', () => {
+                document.querySelectorAll('.interp-frame-img').forEach(el => {
+                    el.addEventListener('click', () => el.classList.toggle('is-depth'));
+                });
+            });
+        })();
+
+        (function initQualViewers() {
+            const TASKS = {
+                point: './assets/glb/point',
+                camera: './assets/glb/camera'
+            };
+            const VIEW_PARAMS = {
+                point: {
+                    facade:      { 'orientation': '0deg 196.2deg 85deg', 'camera-orbit': '0deg 70deg 50%' },
+                    kitchen:     { 'orientation': '0deg 0deg 20deg', 'camera-orbit': '0deg 70deg 50%' },
+                    living_room: { 'orientation': '35deg 40deg 29deg', 'camera-orbit': '0deg 70deg 77%' }
+                },
+                camera: {
+                    bicycle: { 'orientation': '', 'camera-orbit': '0deg 0deg 110%' },
+                    kitchen: { 'orientation': '', 'camera-orbit': '0deg 0deg 110%' },
+                    train:   { 'orientation': '', 'camera-orbit': '0deg 0deg 110%' }
+                }
+            };
+            function applyView(viewer, params) {
+                if (!viewer || !params) return;
+                Object.keys(params).forEach(attr => {
+                    if (params[attr]) viewer.setAttribute(attr, params[attr]);
+                    else viewer.removeAttribute(attr);
+                });
+            }
+            document.addEventListener('DOMContentLoaded', () => {
+                document.querySelectorAll('.qual-task').forEach(task => {
+                    const taskName = task.dataset.task;
+                    const base = TASKS[taskName];
+                    if (!base) return;
+                    const ours = task.querySelector('.qual-viewer-ours');
+                    const baseline = task.querySelector('.qual-viewer-base');
+                    const cards = task.querySelectorAll('.scene-card');
+                    const sceneParams = VIEW_PARAMS[taskName] || {};
+                    function show(scene) {
+                        ours.setAttribute('src', `${base}/${scene}/vgtt.glb`);
+                        baseline.setAttribute('src', `${base}/${scene}/baseline.glb`);
+                        applyView(ours, sceneParams[scene]);
+                        applyView(baseline, sceneParams[scene]);
+                    }
+                    cards.forEach(card => {
+                        card.addEventListener('click', () => {
+                            show(card.dataset.scene);
+                            cards.forEach(c => c.classList.toggle('is-active', c === card));
+                        });
+                    });
+                    const active = task.querySelector('.scene-card.is-active');
+                    if (active) {
+                        applyView(ours, sceneParams[active.dataset.scene]);
+                        applyView(baseline, sceneParams[active.dataset.scene]);
+                    }
+                });
+            });
+        })();
+
+        (function initNeuralRendering() {
+            document.addEventListener('DOMContentLoaded', () => {
+                const task = document.querySelector('.nsr-task');
+                if (!task) return;
+                const slider = task.querySelector('img-comparison-slider');
+                const ours = slider.querySelector('img[slot="first"]');
+                const baseline = slider.querySelector('img[slot="second"]');
+                const cards = task.querySelectorAll('.scene-card');
+                cards.forEach(card => {
+                    card.addEventListener('click', () => {
+                        const scene = card.dataset.scene;
+                        ours.src = `./assets/3dgs/${scene}/ours.png`;
+                        baseline.src = `./assets/3dgs/${scene}/baseline.png`;
+                        cards.forEach(c => c.classList.toggle('is-active', c === card));
+                    });
+                });
+            });
+        })();
+    </script>
+
+    <div class="bottom-background"></div>
+</body>
+</html>
